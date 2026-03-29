@@ -19,6 +19,7 @@ import ArchiveBoxIcon from './components/icons/ArchiveBoxIcon';
 import { StorageService } from './services/storage';
 import PriceHistoryChart from './components/PriceHistoryChart';
 import PrizeDetailModal from './components/PrizeDetailModal';
+import DashboardChart from './components/DashboardChart';
 
 const prizeCategories: PrizeCategory[] = ['マスコット', 'ぬいぐるみ', 'フィギュア', 'その他'];
 const prizeManufacturers: Manufacturer[] = ['バンダイナムコ', 'タイトー', 'SEGA FAVE', 'FuRyu', 'Parade', 'SK', 'その他'];
@@ -37,10 +38,14 @@ const App: React.FC = () => {
   const [selectedManufacturer, setSelectedManufacturer] = useState<Manufacturer | 'すべて'>('すべて');
   const [displayMode, setDisplayMode] = useState<DisplayMode>('card');
   const [sortOrder, setSortOrder] = useState<SortOrder>('date-desc');
+  const [statsDays, setStatsDays] = useState<number>(1);
   
   const [isDirty, setIsDirty] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [showTools, setShowTools] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importCode, setImportCode] = useState('');
+  const [importConfirmData, setImportConfirmData] = useState<Prize[] | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportData = useCallback(() => {
@@ -63,11 +68,19 @@ const App: React.FC = () => {
         .filter((item: any) => item && typeof item === 'object' && (item.id || item.name))
         .map((item: any) => {
           const id = String(item.id || Date.now() + Math.random().toString(36).substr(2, 9));
-          const history = item.history || [{
+          let history = item.history || [{
             timestamp: new Date().toISOString(),
             action: 'import',
             details: 'バックアップからインポートされました'
           }];
+          
+          // 既存の 'stock' を 'buy' に変換
+          history = history.map((h: any) => {
+            if (h.type === 'stock') {
+              return { ...h, type: 'buy' };
+            }
+            return h;
+          });
           
           return {
             ...item,
@@ -86,49 +99,57 @@ const App: React.FC = () => {
         return;
       }
 
-      const isFullBackup = Array.isArray(rawJson);
-      const message = isFullBackup
-        ? `バックアップから ${normalizedItems.length} 件のデータを復元しますか？現在のデータは上書きされます。`
-        : `「${normalizedItems[0].name}」を追加または更新しますか？`;
-
-      if (confirm(message)) {
-        let nextPrizes: Prize[];
-        
-        if (isFullBackup) {
-          nextPrizes = normalizedItems;
-        } else {
-          // 単一アイテムの追加/更新
-          const newItem = normalizedItems[0];
-          const existingIndex = prizes.findIndex(p => p.id === newItem.id);
-          if (existingIndex >= 0) {
-            nextPrizes = [...prizes];
-            nextPrizes[existingIndex] = newItem;
-          } else {
-            nextPrizes = [...prizes, newItem];
-          }
-        }
-
-        setPrizes(nextPrizes);
-        
-        // 自動保存を試行
-        try {
-          setSaveStatus('saving');
-          await StorageService.savePrizes(nextPrizes);
-          setIsDirty(false);
-          setSaveStatus('saved');
-          setTimeout(() => setSaveStatus('idle'), 2000);
-          alert('データが正常に反映され、保存されました。');
-        } catch (error) {
-          console.error("Auto-save failed after import:", error);
-          setIsDirty(true);
-          alert('データは画面上に反映されましたが、保存に失敗しました。右上の「変更を保存」ボタンを手動で押してください。');
-        }
-      }
+      // 確認用データをセットしてモーダル等で確認させる（confirmは使わない）
+      setImportConfirmData(normalizedItems);
+      setIsImportModalOpen(true);
     } catch (error) {
       console.error("Import processing error:", error);
       alert('データの処理中にエラーが発生しました。');
     }
-  }, [prizes]);
+  }, []);
+
+  const finalizeImport = useCallback(async () => {
+    if (!importConfirmData) return;
+
+    try {
+      const isFullBackup = importConfirmData.length > 1 || (importConfirmData.length === 1 && !prizes.find(p => p.id === importConfirmData[0].id));
+      let nextPrizes: Prize[];
+      
+      if (importConfirmData.length > 1) {
+        nextPrizes = importConfirmData;
+      } else {
+        // 単一アイテムの追加/更新
+        const newItem = importConfirmData[0];
+        const existingIndex = prizes.findIndex(p => p.id === newItem.id);
+        if (existingIndex >= 0) {
+          nextPrizes = [...prizes];
+          nextPrizes[existingIndex] = newItem;
+        } else {
+          nextPrizes = [...prizes, newItem];
+        }
+      }
+
+      setPrizes(nextPrizes);
+      setImportConfirmData(null);
+      setIsImportModalOpen(false);
+      setImportCode('');
+      
+      // 自動保存を試行
+      try {
+        setSaveStatus('saving');
+        await StorageService.savePrizes(nextPrizes);
+        setIsDirty(false);
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+        alert('データが正常に復元されました。');
+      } catch (error) {
+        console.error("Auto-save failed after import:", error);
+        setIsDirty(true);
+      }
+    } catch (error) {
+      console.error("Finalize import error:", error);
+    }
+  }, [importConfirmData, prizes]);
 
   const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -147,17 +168,20 @@ const App: React.FC = () => {
     e.target.value = '';
   }, [processImportedData]);
 
-  const handleImportCode = useCallback(async () => {
-    const code = prompt('バックアップJSONコードをここに貼り付けてください:');
-    if (!code) return;
+  const handleImportCode = useCallback(() => {
+    setIsImportModalOpen(true);
+  }, []);
+
+  const handleExecuteImportCode = useCallback(() => {
+    if (!importCode.trim()) return;
 
     try {
-      const rawJson = JSON.parse(code);
-      await processImportedData(rawJson);
+      const rawJson = JSON.parse(importCode);
+      processImportedData(rawJson);
     } catch (error) {
       alert('無効なJSON形式です。貼り付けた内容を確認してください。');
     }
-  }, [processImportedData]);
+  }, [importCode, processImportedData]);
 
   // Load data from IndexedDB
   useEffect(() => {
@@ -281,6 +305,60 @@ const App: React.FC = () => {
     });
   }, []);
 
+  const handleSale = useCallback((prizeId: string) => {
+    setPrizes(prevPrizes => {
+      const next = prevPrizes.map(p => {
+        if (p.id === prizeId && p.quantity > 0) {
+          const timestamp = new Date().toISOString();
+          const latestPrice = p.priceHistory && p.priceHistory.length > 0
+            ? p.priceHistory[p.priceHistory.length - 1].price
+            : 0;
+          const historyEntry = {
+            timestamp,
+            action: 'sale' as const,
+            details: `売却: 1個 (単価: ¥${latestPrice})`,
+            price: latestPrice,
+            quantity: 1,
+            unitPrice: latestPrice,
+            prizeId: p.id,
+            type: 'sell' as const
+          };
+          return { ...p, quantity: p.quantity - 1, history: [...(p.history || []), historyEntry] };
+        }
+        return p;
+      });
+      setIsDirty(true);
+      return next;
+    });
+  }, []);
+
+  const handleAcquisition = useCallback((prizeId: string) => {
+    setPrizes(prevPrizes => {
+      const next = prevPrizes.map(p => {
+        if (p.id === prizeId) {
+          const timestamp = new Date().toISOString();
+          const latestPrice = p.priceHistory && p.priceHistory.length > 0
+            ? p.priceHistory[p.priceHistory.length - 1].price
+            : 0;
+          const historyEntry = {
+            timestamp,
+            action: 'acquisition' as const,
+            details: `仕入れ: 1個 (相場: ¥${latestPrice})`,
+            price: latestPrice,
+            quantity: 1,
+            unitPrice: latestPrice,
+            prizeId: p.id,
+            type: 'buy' as const
+          };
+          return { ...p, quantity: p.quantity + 1, history: [...(p.history || []), historyEntry] };
+        }
+        return p;
+      });
+      setIsDirty(true);
+      return next;
+    });
+  }, []);
+
   const stats = useMemo(() => {
     const totalTypes = prizes.length;
     const totalQuantity = prizes.reduce((sum, p) => sum + p.quantity, 0);
@@ -297,8 +375,68 @@ const App: React.FC = () => {
       return sum + (latestPrice * p.quantity);
     }, 0);
 
-    return { totalTypes, totalQuantity, categoryCount, totalValue };
-  }, [prizes]);
+    // 期間別の売上と仕入れ
+    const now = new Date();
+    const cutoff = new Date();
+    cutoff.setDate(now.getDate() - (statsDays - 1));
+    cutoff.setHours(0, 0, 0, 0);
+
+    let periodSalesTotal = 0;
+    let periodAcquisitionsTotal = 0;
+
+    // グラフ用データの作成
+    const dailyData: Record<string, { date: string, buyAmount: number, sellAmount: number, buyCount: number, sellCount: number }> = {};
+    
+    // 期間内の日付を初期化（データがない日も0で表示するため）
+    // ローカルタイムゾーンの基準で日付を生成
+    for (let i = 0; i < statsDays; i++) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      dailyData[dateStr] = { date: dateStr, buyAmount: 0, sellAmount: 0, buyCount: 0, sellCount: 0 };
+    }
+
+    prizes.forEach(p => {
+      p.history?.forEach(h => {
+        const hDate = new Date(h.timestamp);
+        if (hDate >= cutoff) {
+          // ローカルの日付文字列をキーにする
+          const year = hDate.getFullYear();
+          const month = String(hDate.getMonth() + 1).padStart(2, '0');
+          const day = String(hDate.getDate()).padStart(2, '0');
+          const dateStr = `${year}-${month}-${day}`;
+          
+          if (!dailyData[dateStr]) return; // 期間外は無視
+
+          // 'type' フィールドを優先し、互換性のために 'action' もチェック
+          // 'stock' は 'buy' として扱う
+          const isSale = h.type === 'sell' || h.action === 'sale';
+          const isAcquisition = h.type === 'buy' || h.type === 'stock' || h.action === 'acquisition';
+
+          const qty = h.quantity || 1;
+          const up = h.unitPrice || h.price || 0;
+          const amount = qty * up;
+
+          if (isSale) {
+            periodSalesTotal += amount;
+            dailyData[dateStr].sellAmount += amount;
+            dailyData[dateStr].sellCount += qty;
+          } else if (isAcquisition) {
+            periodAcquisitionsTotal += amount;
+            dailyData[dateStr].buyAmount += amount;
+            dailyData[dateStr].buyCount += qty;
+          }
+        }
+      });
+    });
+
+    const chartData = Object.values(dailyData).sort((a, b) => a.date.localeCompare(b.date));
+
+    return { totalTypes, totalQuantity, categoryCount, totalValue, periodSalesTotal, periodAcquisitionsTotal, chartData };
+  }, [prizes, statsDays]);
 
   const filteredAndSortedPrizes = useMemo(() => {
     const filtered = prizes
@@ -462,6 +600,27 @@ const App: React.FC = () => {
       </header>
 
       <main className="container mx-auto px-4 py-3 sm:py-6">
+        <div className="mb-4 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">統計期間</p>
+            <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl overflow-x-auto no-scrollbar max-w-full">
+              {[1, 7, 14, 30, 90, 180, 365].map(days => (
+                <button
+                  key={days}
+                  onClick={() => setStatsDays(days)}
+                  className={`px-3 py-1 rounded-lg text-[10px] font-black whitespace-nowrap transition-all ${
+                    statsDays === days 
+                      ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 shadow-sm' 
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  {days === 1 ? '今日' : `${days}日間`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
         <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
           <div className="flex gap-3 sm:contents">
             <div className="flex-1 bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700">
@@ -473,19 +632,52 @@ const App: React.FC = () => {
               <p className="text-lg sm:text-2xl font-black text-slate-800 dark:text-white">{stats.totalQuantity} <span className="text-[10px] sm:text-sm font-normal text-slate-500">個</span></p>
             </div>
           </div>
-          <div className="bg-indigo-600 p-4 sm:p-5 rounded-3xl shadow-xl shadow-indigo-100 dark:shadow-none text-white overflow-hidden relative sm:col-span-2">
-            <div className="relative z-10">
-              <p className="text-[9px] sm:text-[10px] font-black uppercase opacity-60 tracking-widest mb-2 text-indigo-100">カテゴリ分布</p>
-              <div className="flex flex-wrap gap-1.5 sm:gap-2">
-                {prizeCategories.map(cat => (
-                  <div key={cat} className="bg-white/10 backdrop-blur px-2 py-0.5 sm:py-1 rounded-lg text-[10px] sm:text-xs font-bold">
-                    {cat}: {stats.categoryCount[cat] || 0}
-                  </div>
-                ))}
-              </div>
+          <div className="flex gap-3 sm:contents">
+            <div className="flex-1 bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700">
+              <p className="text-[9px] sm:text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">
+                {statsDays === 1 ? '今日' : `${statsDays}日間`}の売上総額
+              </p>
+              <p className="text-lg sm:text-2xl font-black text-emerald-600 dark:text-emerald-400">¥{stats.periodSalesTotal.toLocaleString()}</p>
             </div>
-            <div className="absolute top-0 right-0 w-24 sm:w-32 h-24 sm:h-32 bg-white/10 rounded-full -mr-8 sm:-mr-10 -mt-8 sm:-mt-10 blur-2xl"></div>
+            <div className="flex-1 bg-white dark:bg-slate-800 p-4 sm:p-5 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700">
+              <p className="text-[9px] sm:text-[10px] font-black uppercase text-slate-400 tracking-widest mb-1">
+                {statsDays === 1 ? '今日' : `${statsDays}日間`}獲得の相場総額
+              </p>
+              <p className="text-lg sm:text-2xl font-black text-amber-600 dark:text-amber-400">¥{stats.periodAcquisitionsTotal.toLocaleString()}</p>
+            </div>
           </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6 sm:mb-8">
+          <DashboardChart 
+            data={stats.chartData} 
+            title="活動回数（操作数）" 
+            buyKey="buyCount" 
+            sellKey="sellCount" 
+            unit="回"
+          />
+          <DashboardChart 
+            data={stats.chartData} 
+            title="収支推移（総額）" 
+            buyKey="buyAmount" 
+            sellKey="sellAmount" 
+            unit="円"
+            yAxisFormatter={(val) => `¥${val.toLocaleString()}`}
+          />
+        </div>
+
+        <div className="bg-indigo-600 p-4 sm:p-5 rounded-3xl shadow-xl shadow-indigo-100 dark:shadow-none text-white overflow-hidden relative mb-6 sm:mb-8">
+          <div className="relative z-10">
+            <p className="text-[9px] sm:text-[10px] font-black uppercase opacity-60 tracking-widest mb-2 text-indigo-100">カテゴリ分布</p>
+            <div className="flex flex-wrap gap-1.5 sm:gap-2">
+              {prizeCategories.map(cat => (
+                <div key={cat} className="bg-white/10 backdrop-blur px-2 py-0.5 sm:py-1 rounded-lg text-[10px] sm:text-xs font-bold">
+                  {cat}: {stats.categoryCount[cat] || 0}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="absolute top-0 right-0 w-24 sm:w-32 h-24 sm:h-32 bg-white/10 rounded-full -mr-8 sm:-mr-10 -mt-8 sm:-mt-10 blur-2xl"></div>
         </div>
 
         {prizes.length === 0 ? (
@@ -503,6 +695,8 @@ const App: React.FC = () => {
                 onEdit={(p) => { setPrizeToEdit(p); setIsModalOpen(true); }}
                 onDelete={handleDeletePrize}
                 onQuantityChange={handleQuantityChange}
+                onSale={handleSale}
+                onAcquisition={handleAcquisition}
                 onShowHistory={(p) => setHistoryPrize(p)}
                 onShowDetail={(p) => setDetailPrize(p)}
               />
@@ -514,6 +708,8 @@ const App: React.FC = () => {
             onEdit={(p) => { setPrizeToEdit(p); setIsModalOpen(true); }}
             onDelete={handleDeletePrize}
             onQuantityChange={handleQuantityChange}
+            onSale={handleSale}
+            onAcquisition={handleAcquisition}
             onShowDetail={(p) => setDetailPrize(p)}
           />
         )}
@@ -560,6 +756,85 @@ const App: React.FC = () => {
         onSave={handleSavePrize}
         prizeToEdit={prizeToEdit}
       />
+
+      {/* Import Code Modal */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-800 w-full max-w-2xl rounded-[2.5rem] shadow-2xl p-6 sm:p-8 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-xl font-black text-slate-800 dark:text-white">コードから復元</h3>
+                <p className="text-xs font-bold text-slate-400 mt-1">バックアップJSONコードを貼り付けてください</p>
+              </div>
+              <button 
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportCode('');
+                  setImportConfirmData(null);
+                }} 
+                className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {!importConfirmData ? (
+              <div className="space-y-4">
+                <textarea
+                  value={importCode}
+                  onChange={(e) => setImportCode(e.target.value)}
+                  placeholder='[{"id": "...", "name": "...", ...}]'
+                  className="w-full h-64 p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-700 rounded-2xl text-xs font-mono focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                />
+                <button
+                  onClick={handleExecuteImportCode}
+                  disabled={!importCode.trim()}
+                  className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm shadow-lg shadow-indigo-200 dark:shadow-none disabled:opacity-50 transition-all"
+                >
+                  コードを解析する
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-800">
+                  <p className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
+                    {importConfirmData.length} 件のアイテムが見つかりました。
+                  </p>
+                  <p className="text-xs text-indigo-500/70 mt-1">
+                    復元を実行すると現在のデータは上書きされます。よろしいですか？
+                  </p>
+                </div>
+                
+                <div className="max-h-48 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                  {importConfirmData.map((item, i) => (
+                    <div key={i} className="flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl">
+                      <span className="text-xs font-bold truncate pr-4">{item.name}</span>
+                      <span className="text-[10px] font-black bg-white dark:bg-slate-600 px-2 py-0.5 rounded-md shrink-0">
+                        在庫: {item.quantity}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setImportConfirmData(null)}
+                    className="flex-1 py-4 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-2xl font-black text-sm"
+                  >
+                    戻る
+                  </button>
+                  <button
+                    onClick={finalizeImport}
+                    className="flex-[2] py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm shadow-lg shadow-indigo-200 dark:shadow-none"
+                  >
+                    復元を実行する
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {detailPrize && (
         <PrizeDetailModal

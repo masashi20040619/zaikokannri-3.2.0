@@ -9,10 +9,12 @@ interface PrizeListProps {
   onEdit: (prize: Prize) => void;
   onDelete: (prizeId: string) => void;
   onQuantityChange: (prizeId: string, newQuantity: number) => void;
+  onSale: (prizeId: string) => void;
+  onAcquisition: (prizeId: string) => void;
   onShowDetail?: (prize: Prize) => void;
 }
 
-const PrizeList: React.FC<PrizeListProps> = ({ prizes, onEdit, onDelete, onQuantityChange, onShowDetail }) => {
+const PrizeList: React.FC<PrizeListProps> = ({ prizes, onEdit, onDelete, onQuantityChange, onSale, onAcquisition, onShowDetail }) => {
   return (
     <div className="space-y-3 sm:space-y-0 sm:bg-white sm:dark:bg-slate-800 sm:rounded-lg sm:shadow-lg sm:overflow-x-auto">
       {/* Mobile View: Compact Cards */}
@@ -41,6 +43,21 @@ const PrizeList: React.FC<PrizeListProps> = ({ prizes, onEdit, onDelete, onQuant
                   <span className="text-xs font-black w-4 text-center">{prize.quantity}</span>
                   <button onClick={() => onQuantityChange(prize.id, prize.quantity + 1)} className="text-slate-400 text-lg font-bold">+</button>
                 </div>
+                <div className="flex gap-1">
+                  <button 
+                    onClick={() => onSale(prize.id)} 
+                    disabled={prize.quantity === 0}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-black ${prize.quantity === 0 ? 'bg-slate-100 text-slate-300' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'}`}
+                  >
+                    売れた
+                  </button>
+                  <button 
+                    onClick={() => onAcquisition(prize.id)} 
+                    className="px-2 py-1 bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400 rounded-lg text-[10px] font-black"
+                  >
+                    仕入
+                  </button>
+                </div>
               </div>
             </div>
             <div className="flex flex-col gap-2">
@@ -63,6 +80,9 @@ const PrizeList: React.FC<PrizeListProps> = ({ prizes, onEdit, onDelete, onQuant
             </th>
             <th scope="col" className="px-6 py-3 text-center">
               数量
+            </th>
+            <th scope="col" className="px-6 py-3 text-center">
+              在庫管理
             </th>
             <th scope="col" className="px-6 py-3">
               獲得日
@@ -106,6 +126,23 @@ const PrizeList: React.FC<PrizeListProps> = ({ prizes, onEdit, onDelete, onQuant
                     aria-label="増やす"
                   >
                     +
+                  </button>
+                </div>
+              </td>
+              <td className="px-6 py-4">
+                <div className="flex items-center justify-center gap-2">
+                  <button 
+                    onClick={() => onSale(prize.id)} 
+                    disabled={prize.quantity === 0}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all ${prize.quantity === 0 ? 'bg-slate-100 text-slate-300 cursor-not-allowed' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400'}`}
+                  >
+                    売れた
+                  </button>
+                  <button 
+                    onClick={() => onAcquisition(prize.id)} 
+                    className="px-3 py-1.5 bg-amber-50 text-amber-600 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 rounded-xl text-[10px] font-black transition-all"
+                  >
+                    仕入れた
                   </button>
                 </div>
               </td>

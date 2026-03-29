@@ -11,11 +11,13 @@ interface PrizeCardProps {
   onEdit: (prize: Prize) => void;
   onDelete: (prizeId: string) => void;
   onQuantityChange: (prizeId: string, newQuantity: number) => void;
+  onSale: (prizeId: string) => void;
+  onAcquisition: (prizeId: string) => void;
   onShowHistory?: (prize: Prize) => void;
   onShowDetail?: (prize: Prize) => void;
 }
 
-const PrizeCard: React.FC<PrizeCardProps> = ({ prize, onEdit, onDelete, onQuantityChange, onShowHistory, onShowDetail }) => {
+const PrizeCard: React.FC<PrizeCardProps> = ({ prize, onEdit, onDelete, onQuantityChange, onSale, onAcquisition, onShowHistory, onShowDetail }) => {
   const priceInfo = useMemo(() => {
     if (!prize.priceHistory || prize.priceHistory.length === 0) return null;
     
@@ -94,6 +96,31 @@ const PrizeCard: React.FC<PrizeCardProps> = ({ prize, onEdit, onDelete, onQuanti
                  <ChartBarIcon className="w-5 h-5" />
                </button>
              )}
+          </div>
+
+          <div className="h-px bg-slate-50 dark:bg-slate-700/50"></div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">在庫管理</span>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => onSale(prize.id)}
+                disabled={prize.quantity === 0}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-[10px] font-black transition-all ${
+                  prize.quantity === 0 
+                    ? 'bg-slate-100 text-slate-300 cursor-not-allowed' 
+                    : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400'
+                }`}
+              >
+                売れた
+              </button>
+              <button 
+                onClick={() => onAcquisition(prize.id)}
+                className="flex items-center gap-1 px-3 py-1.5 bg-amber-50 text-amber-600 hover:bg-amber-100 dark:bg-amber-900/20 dark:text-amber-400 rounded-xl text-[10px] font-black transition-all"
+              >
+                仕入れた
+              </button>
+            </div>
           </div>
 
           <div className="h-px bg-slate-50 dark:bg-slate-700/50"></div>

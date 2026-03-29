@@ -8,12 +8,17 @@ export interface PriceRecord {
   price: number;
 }
 
-export type HistoryAction = 'registration' | 'quantity_change' | 'edit' | 'import';
+export type HistoryAction = 'registration' | 'quantity_change' | 'edit' | 'import' | 'sale' | 'acquisition';
 
 export interface HistoryRecord {
   timestamp: string;
   action: HistoryAction;
   details: string;
+  price?: number; // 売却価格や獲得時の相場 (互換性のため残す)
+  quantity?: number; // 数量
+  unitPrice?: number; // 単価（その時の相場）
+  prizeId?: string; // 商品ID
+  type?: 'sell' | 'buy'; // 種類（sell または buy）
 }
 
 export interface Prize {
